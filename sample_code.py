@@ -1,10 +1,26 @@
 import os
-import random
 import pandas as pd
+import easyocr
+from PIL import Image
 import torch
 from torchvision import models, transforms
-from PIL import Image
 from src.utils import download_image
+
+# Initialize the OCR reader
+reader = easyocr.Reader(['en'])
+
+# Entity-unit mapping from the provided appendix
+entity_unit_map = {
+    'width': {'centimetre', 'foot', 'inch', 'metre', 'millimetre', 'yard'},
+    'depth': {'centimetre', 'foot', 'inch', 'metre', 'millimetre', 'yard'},
+    'height': {'centimetre', 'foot', 'inch', 'metre', 'millimetre', 'yard'},
+    'item_weight': {'gram', 'kilogram', 'microgram', 'milligram', 'ounce', 'pound', 'ton'},
+    'maximum_weight_recommendation': {'gram', 'kilogram', 'microgram', 'milligram', 'ounce', 'pound', 'ton'},
+    'voltage': {'kilovolt', 'millivolt', 'volt'},
+    'wattage': {'kilowatt', 'watt'},
+    'item_volume': {'centilitre', 'cubic foot', 'cubic inch', 'cup', 'decilitre', 'fluid ounce', 'gallon',
+                    'imperial gallon', 'litre', 'microlitre', 'millilitre', 'pint', 'quart'}
+}
 
 
 def load_model():
@@ -32,11 +48,33 @@ def preprocess_image(img_path):
     return batch_t
 
 
+def extract_text_from_image(img_path):
+    # Use OCR to extract text
+    results = reader.readtext(img_path)
+    extracted_text = " ".join([res[1] for res in results])
+    return extracted_text
+
+
+def match_entity_value(extracted_text, entity_name):
+    # Extract number and unit based on the entity type
+    allowed_units = entity_unit_map.get(entity_name, [])
+
+    for unit in allowed_units:
+        if unit in extracted_text:
+            # Extract the number before the unit
+            try:
+                # Find the number that comes before the unit
+                number = float(extracted_text.split(unit)[0].strip().split()[-1])
+                return f"{number} {unit}"
+            except:
+                continue
+    return ""
+
+
 def predictor(image_link, category_id, entity_name, model):
     '''
-    Predict using a pre-trained model
+    Predict using the model and OCR
     '''
-    # Folder to save the image
     save_folder = 'dataset/images/'
 
     # Check if the folder exists, if not, create it
@@ -49,19 +87,20 @@ def predictor(image_link, category_id, entity_name, model):
 
     if img_path:  # Check if the image is downloaded successfully
         try:
-            # Preprocess the image
-            img_tensor = preprocess_image(img_path)
+            # Extract text from the image using OCR
+            extracted_text = extract_text_from_image(img_path)
+            print(f"Extracted Text: {extracted_text}")
 
-            # Make a prediction using the pre-trained model
-            with torch.no_grad():
-                output = model(img_tensor)
-
+            # Match the extracted text with the expected entity name and value
+            predicted_value = match_entity_value(extracted_text, entity_name)
+            print(f"Predicted Value: {predicted_value}")
+            return predicted_value
 
         except Exception as e:
             print(f"Error processing image: {e}")
             return "Error processing image"
 
-    return "" if random.random() > 0.5 else "10 inch"
+    return ""
 
 
 if __name__ == "__main__":
